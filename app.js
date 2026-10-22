@@ -1,6 +1,6 @@
 import { PROJECTS, DEFAULT_PROJECT_ID } from './projects.js';
 import { datasetsForSide, initialState, normalizeDataset, projectURL, validateProject } from './project-config.js';
-import { compareElectorate } from './changes.js';
+import { ChangeCalculator } from './change-calculator.js';
 
 const $ = (id) => document.getElementById(id);
 const requestedProject = new URLSearchParams(location.search).get('project');
@@ -19,13 +19,33 @@ const state = initialState(project, params);
 const empty = { type: 'FeatureCollection', features: [] };
 const cache = new Map();
 const changeCache = new Map();
+const calculator = new ChangeCalculator();
 const maps = [];
+const sourceData = new WeakMap();
+const highlightedNames = [];
 let generation = 0;
 let ready = false;
 let syncing = false;
 let toastTimer;
 let electorateNames = [];
 let changeBounds = null;
+let comparisonMapPromise = null;
+let urlTimer;
+let inspectionFrame;
+let lastInspectionKey = '';
+
+function setSourceData(map, id, data) {
+  if (!sourceData.has(map)) sourceData.set(map, new Map());
+  const previous = sourceData.get(map);
+  if (previous.get(id) === data) return;
+  map.getSource(id).setData(data);
+  previous.set(id, data);
+}
+
+function scheduleURLUpdate() {
+  clearTimeout(urlTimer);
+  urlTimer = setTimeout(updateURL, 250);
+}
 
 async function loadDataset(id) {
   if (!cache.has(id)) {
@@ -44,6 +64,7 @@ async function loadDataset(id) {
 }
 
 function updateURL() {
+  clearTimeout(urlTimer);
   if (!ready) return;
   const center = maps[1].getCenter();
   const hash = new URLSearchParams({
@@ -54,7 +75,13 @@ function updateURL() {
   if (state.mode === 'change') hash.set('electorate', state.electorate);
   const url = projectURL(location.href, project.id);
   url.hash = hash.toString();
-  history.replaceState(null, '', url);
+  if (url.href !== location.href) history.replaceState(null, '', url);
+}
+
+function updateDivider() {
+  $('map-stage').style.setProperty('--split', `${state.split}%`);
+  $('divider-handle').setAttribute('aria-valuenow', Math.round(state.split));
+  $('divider-handle').setAttribute('aria-valuetext', `${Math.round(state.split)}% map A, ${Math.round(100 - state.split)}% map B`);
 }
 
 function updateControls() {
@@ -72,13 +99,12 @@ function updateControls() {
   }
   $('map-stage').classList.toggle('overlay', state.mode === 'overlay');
   $('map-stage').classList.toggle('change', state.mode === 'change');
+  $('map-left').hidden = state.mode !== 'swipe';
   document.body.classList.toggle('change-mode', state.mode === 'change');
   $('change-controls').hidden = state.mode !== 'change';
   $('inspection').hidden = state.mode === 'change';
   if (state.mode !== 'change') $('change-legend').hidden = true;
-  $('map-stage').style.setProperty('--split', `${state.split}%`);
-  $('divider-handle').setAttribute('aria-valuenow', Math.round(state.split));
-  $('divider-handle').setAttribute('aria-valuetext', `${Math.round(state.split)}% map A, ${Math.round(100 - state.split)}% map B`);
+  updateDivider();
   document.querySelectorAll('[data-mode]').forEach((button) => button.setAttribute('aria-pressed', button.dataset.mode === state.mode));
   $('mode-help').textContent = state.mode === 'change' ? 'Click an A electorate or choose one below to see what B adds or removes.' : state.mode === 'overlay' ? 'A is an outline; B is a translucent colour fill.' : 'Drag the divider to reveal the differences.';
   $('labels').checked = state.labels;
@@ -122,17 +148,28 @@ async function render({ fitChange = false } = {}) {
   updateControls();
   if (!ready) return;
   const version = ++generation;
+  calculator.cancel();
   $('map-status').hidden = false;
   $('map-status').classList.remove('error');
   $('map-status').textContent = 'Loading boundaries…';
   $('change-legend').hidden = true;
   changeBounds = null;
   try {
-    const [left, right, baseline] = await Promise.all([loadDataset(state.left), loadDataset(state.right), baselineDataset ? loadDataset(baselineDataset.id) : empty]);
+    if (state.mode === 'swipe') {
+      if (!maps[0]) comparisonMapPromise = createMap('left', { center: maps[1].getCenter(), zoom: maps[1].getZoom() });
+      await comparisonMapPromise;
+    } else if (maps[0]) {
+      const comparison = maps[0];
+      delete maps[0];
+      comparisonMapPromise = null;
+      comparison.remove();
+    }
+    if (version !== generation) return;
+    const [left, right, baseline] = await Promise.all([loadDataset(state.left), loadDataset(state.right), baselineDataset && state.baseline ? loadDataset(baselineDataset.id) : empty]);
     if (version !== generation) return;
     electorateNames = [...new Set([...left.features, ...right.features].map((feature) => feature.properties.displayName))].sort();
     if (!electorateNames.includes(state.electorate)) state.electorate = electorateNames.includes(project.defaults?.electorate) ? project.defaults.electorate : electorateNames[0] || '';
-    const count = new Set((baselineDataset ? baseline : left).features.map((feature) => feature.properties.displayName)).size;
+    const count = new Set(left.features.map((feature) => feature.properties.displayName)).size;
     $('project-footer').textContent = `${count} ${project.electorateLabel || 'electorates'}. A few different possibilities.`;
     $('change-electorate').replaceChildren(...electorateNames.map((name) => new Option(name, name)));
     $('change-electorate').value = state.electorate;
@@ -143,19 +180,25 @@ async function render({ fitChange = false } = {}) {
     let changes = null;
     if (state.mode === 'change') {
       $('map-status').textContent = 'Calculating boundary changes…';
-      // Allow loading feedback to paint before the polygon operations run.
-      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
-      if (version !== generation) return;
       const key = JSON.stringify([project.id, state.left, state.right, state.electorate]);
-      if (!changeCache.has(key)) changeCache.set(key, compareElectorate(left, right, state.electorate));
+      if (!changeCache.has(key)) {
+        const result = await calculator.calculate(left, right, state.electorate);
+        if (version !== generation) return;
+        // Bound cached geometry memory, especially on phones.
+        if (changeCache.size >= 20) changeCache.delete(changeCache.keys().next().value);
+        changeCache.set(key, result);
+      }
       changes = changeCache.get(key);
     }
     for (let i = 0; i < maps.length; i++) {
       const map = maps[i];
+      if (!map) continue;
       const dataset = datasetById(i ? state.right : state.left);
-      map.getSource('boundary').setData(changes ? (i ? changes.b : changes.a) || empty : i ? right : left);
-      map.getSource('reference').setData(i && (changes || state.mode === 'overlay') ? left : empty);
-      map.getSource('baseline').setData(state.baseline ? baseline : empty);
+      setSourceData(map, 'boundary', changes ? (i ? changes.b : changes.a) || empty : i ? right : left);
+      // In Swipe, A lives on the second map; in other modes it is a source
+      // on the primary map, avoiding a hidden renderer and duplicated tiles.
+      setSourceData(map, 'reference', i && (changes || state.mode === 'overlay') ? left : empty);
+      setSourceData(map, 'baseline', state.baseline ? baseline : empty);
       map.setPaintProperty('boundary-fill', 'fill-color', dataset.color);
       map.setPaintProperty('boundary-fill', 'fill-opacity', changes ? 0 : state.mode === 'overlay' ? (i ? 0.14 : 0) : 0.09);
       map.setPaintProperty('boundary-line', 'line-color', dataset.color);
@@ -172,8 +215,9 @@ async function render({ fitChange = false } = {}) {
       map.setLayoutProperty('boundary-highlight', 'visibility', changes || state.mode === 'overlay' && !i ? 'none' : 'visible');
       map.setLayoutProperty('boundary-label', 'visibility', state.labels ? 'visible' : 'none');
       map.setFilter('boundary-highlight', ['==', ['get', 'displayName'], '']);
+      highlightedNames[i] = null;
       map.getCanvas().style.cursor = '';
-      for (const kind of ['added', 'removed', 'retained']) map.getSource(`change-${kind}`).setData(i && changes ? changes[kind] || empty : empty);
+      for (const kind of ['added', 'removed', 'retained']) setSourceData(map, `change-${kind}`, i && changes ? changes[kind] || empty : empty);
     }
     $('electorates').replaceChildren(...electorateNames.map((name) => new Option(name, name)));
     if (changes) {
@@ -200,6 +244,7 @@ async function render({ fitChange = false } = {}) {
 }
 
 function clearInspection() {
+  lastInspectionKey = '';
   $('inspection').replaceChildren();
   const title = document.createElement('p');
   title.className = 'eyebrow';
@@ -222,17 +267,24 @@ function inspect(lngLat) {
     maps[1].getCanvas().style.cursor = changeElectorateAt(maps[1], lngLat) ? 'pointer' : '';
     return;
   }
-  const results = maps.map((map) => {
-    const point = map.project(lngLat);
-    return map.queryRenderedFeatures(point, { layers: ['boundary-fill'] })[0]?.properties.displayName;
-  });
+  const primary = maps[1];
+  const aMap = state.mode === 'swipe' ? maps[0] : primary;
+  if (!aMap?.getLayer('boundary-fill')) return;
+  const aLayer = state.mode === 'swipe' ? 'boundary-fill' : 'reference-hit';
+  const results = [
+    aMap.queryRenderedFeatures(aMap.project(lngLat), { layers: [aLayer] })[0]?.properties.displayName,
+    primary.queryRenderedFeatures(primary.project(lngLat), { layers: ['boundary-fill'] })[0]?.properties.displayName,
+  ];
+  const key = JSON.stringify(results);
+  if (key === lastInspectionKey) return;
+  lastInspectionKey = key;
   $('inspection').replaceChildren();
   const title = document.createElement('p');
   title.className = 'eyebrow';
   title.textContent = 'Electorates at this location';
   $('inspection').append(title);
-  maps.forEach((map, i) => {
-    highlightElectorate(map, results[i] || '', i);
+  results.forEach((nameAtPoint, i) => {
+    if (maps[i]) highlightElectorate(maps[i], nameAtPoint || '', i);
     const dataset = datasetById(i ? state.right : state.left);
     const row = document.createElement('div');
     row.className = 'inspect-row';
@@ -247,6 +299,8 @@ function inspect(lngLat) {
 }
 
 function highlightElectorate(map, name, index) {
+  if (highlightedNames[index] === name) return;
+  highlightedNames[index] = name;
   map.setFilter('boundary-highlight', ['==', ['get', 'displayName'], name]);
   if (state.mode === 'overlay' && index === 1) {
     map.setPaintProperty('boundary-fill', 'fill-opacity', name
@@ -297,8 +351,8 @@ async function searchElectorate(event) {
 
 function setSplit(value) {
   state.split = Math.max(0, Math.min(100, value));
-  updateControls();
-  updateURL();
+  updateDivider();
+  scheduleURLUpdate();
 }
 
 function setupProjectControls() {
@@ -377,7 +431,7 @@ function setupControls() {
   };
   handle.addEventListener('pointerdown', (event) => { handle.setPointerCapture(event.pointerId); moveDivider(event); });
   handle.addEventListener('pointermove', (event) => { if (handle.hasPointerCapture(event.pointerId)) moveDivider(event); });
-  handle.addEventListener('pointerup', (event) => { if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId); });
+  handle.addEventListener('pointerup', (event) => { if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId); updateURL(); });
   handle.addEventListener('keydown', (event) => {
     const values = { ArrowLeft: state.split - 2, ArrowRight: state.split + 2, Home: 0, End: 100 };
     if (event.key in values) { event.preventDefault(); setSplit(values[event.key]); }
@@ -400,46 +454,67 @@ function setupControls() {
   updateControls();
 }
 
-async function init() {
-  PROJECTS.forEach(validateProject);
-  setupControls();
-  if (!window.maplibregl) throw new Error('The MapLibre library could not load. Check your connection and reload.');
+function createMap(side, camera) {
   const options = {
     style: 'https://tiles.openfreemap.org/styles/positron',
     center: [boundedNumber('lng', project.map.center[0], -180, 180), boundedNumber('lat', project.map.center[1], -85, 85)],
     zoom: boundedNumber('z', project.map.zoom, 3, 16), minZoom: 3, maxZoom: 16,
     attributionControl: false, pitchWithRotate: false, dragRotate: false,
+    // A DPR-3 phone otherwise shades nine pixels per CSS pixel on each map.
+    pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+    ...camera,
   };
-  for (const side of ['left', 'right']) {
-    const map = new maplibregl.Map({ ...options, container: `map-${side}` });
-    map.touchZoomRotate.disableRotation();
-    maps.push(map);
-    map.on('error', (event) => {
-      console.error('Map resource error:', event.error);
-      $('map-status').hidden = false;
-      $('map-status').classList.add('error');
-      $('map-status').textContent = 'A map resource could not load. Check your internet connection and reload.';
-    });
-    map.on('move', () => {
-      if (syncing) return;
-      syncing = true;
-      maps.forEach((other) => { if (other !== map) other.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: 0, pitch: 0 }); });
-      syncing = false;
-    });
-    map.on('moveend', updateURL);
-    map.on('mousemove', (event) => inspect(event.lngLat));
-    map.on('click', (event) => {
-      if (!ready) return;
-      if (state.mode === 'change') {
-        const name = changeElectorateAt(map, event.lngLat);
-        if (name && name !== state.electorate) selectElectorate(name);
-      } else inspect(event.lngLat);
+  const map = new maplibregl.Map({ ...options, container: `map-${side}` });
+  map.touchZoomRotate.disableRotation();
+  maps[side === 'left' ? 0 : 1] = map;
+  map.on('error', (event) => {
+    console.error('Map resource error:', event.error);
+    $('map-status').hidden = false;
+    $('map-status').classList.add('error');
+    $('map-status').textContent = 'A map resource could not load. Check your internet connection and reload.';
+  });
+  map.on('move', () => {
+    if (syncing || state.mode !== 'swipe') return;
+    syncing = true;
+    maps.forEach((other) => { if (other !== map) other.jumpTo({ center: map.getCenter(), zoom: map.getZoom(), bearing: 0, pitch: 0 }); });
+    syncing = false;
+  });
+  // jumpTo on the synced map emits moveend on every animation frame.
+  // Never write browser history for those events (Safari rate-limits it).
+  map.on('moveend', () => { if (!syncing) scheduleURLUpdate(); });
+  if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    map.on('mousemove', (event) => {
+      if (map.isMoving()) return;
+      cancelAnimationFrame(inspectionFrame);
+      inspectionFrame = requestAnimationFrame(() => inspect(event.lngLat));
     });
   }
-  maps[1].addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
-  maps[0].addControl(new maplibregl.ScaleControl(), 'bottom-left');
-  maps[1].addControl(new maplibregl.ScaleControl(), 'bottom-left');
-  await Promise.all(maps.map((map) => new Promise((resolve) => map.on('load', () => { addLayers(map); resolve(); }))));
+  map.on('click', (event) => {
+    if (!ready) return;
+    if (state.mode === 'change') {
+      const name = changeElectorateAt(map, event.lngLat);
+      if (name && name !== state.electorate) selectElectorate(name);
+    } else inspect(event.lngLat);
+  });
+  if (side === 'right') map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+  map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+  return new Promise((resolve) => {
+    map.once('load', () => { addLayers(map); resolve(map); });
+    // A rapid mode switch can remove a comparison before its style loads.
+    map.once('remove', () => resolve(null));
+  });
+}
+
+async function init() {
+  PROJECTS.forEach(validateProject);
+  setupControls();
+  if (!window.maplibregl) throw new Error('The MapLibre library could not load. Check your connection and reload.');
+  await createMap('right');
+  let resizeFrame;
+  new ResizeObserver(() => {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => maps.forEach((map) => map.resize()));
+  }).observe($('map-stage'));
   ready = true;
   await render({ fitChange: !params.has('lng') });
 }

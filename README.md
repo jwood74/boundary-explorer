@@ -20,7 +20,7 @@ With Node.js 20 or later:
 npm test
 ```
 
-These dependency-free tests cover project configuration, dataset eligibility, shared-view defaults, GeoJSON field/name mapping and project URLs.
+These dependency-free tests cover project configuration, dataset eligibility, shared-view defaults, GeoJSON field/name mapping, project URLs and background-worker cancellation/retry behaviour.
 
 ## Projects and links
 
@@ -74,7 +74,7 @@ export default {
   electorateLabel: 'federal electorates',
   nameProperty: 'name',
   baselineDataset: 'current', // Optional; omit if no reference layer is wanted.
-  defaults: { left: 'current', right: 'lib', electorate: 'Clark', mode: 'swipe' },
+  defaults: { left: 'current', right: 'lib', electorate: 'Clark', mode: 'overlay' },
   map: {
     center: [146.6, -42],
     zoom: 6.5,
@@ -116,6 +116,15 @@ Change mode uses Turf.js polygon differences and intersection without snapping o
 
 Tiny differences may reflect digitisation rather than intended changes. Areas are approximate geographic measurements, not enrolment or voter counts.
 
+### Mobile performance
+
+- Overlay and Change use one map renderer. Swipe creates a second renderer only while that mode is active.
+- Shared-link updates are debounced until gestures settle; synchronised animation frames do not write browser history.
+- Change calculations run in a cancellable background worker. Only the selected electorate's geometry is sent to it, and Turf is loaded there on demand rather than on the UI thread. A newer selection cancels obsolete calculations.
+- Full-precision comparison results are cached with a 20-entry limit. Display toggles do not resend unchanged GeoJSON to the map workers.
+- Rendering resolution is capped at 2× CSS pixels to reduce GPU load on high-density phones. Touch interaction inspects on tap rather than running hover queries while panning.
+- A resize observer keeps the map canvas aligned with the available space when controls or browser dimensions change.
+
 The Queensland project uses user-supplied `current.geojson`, `lnp.geojson` and `grn.geojson`, each containing 30 features. Source document URLs, licensing and digitisation details have not yet been supplied. Party suggestions are distinct from the forthcoming official proposal.
 
 ## Publish on GitHub Pages
@@ -129,6 +138,8 @@ index.html                  Shared interface
 style.css                   Responsive styles
 app.js                      Map interactions and project selection
 changes.js                  Polygon comparisons
+change-calculator.js        Cancellable background-calculation client
+change-worker.js            On-demand Turf worker (off the UI thread)
 project-config.js           Configuration, view defaults and data normalisation
 projects.js                 Project registry and default project
 projects/<id>/config.js     Project-specific metadata, versions and map views

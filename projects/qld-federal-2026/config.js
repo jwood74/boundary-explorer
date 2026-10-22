@@ -10,7 +10,7 @@ export default {
   electorateLabel: 'federal electorates',
   nameProperty: 'name',
   baselineDataset: 'current',
-  defaults: { left: 'current', right: 'lnp', electorate: 'Griffith', mode: 'swipe' },
+  defaults: { left: 'current', right: 'lnp', electorate: 'Griffith', mode: 'overlay' },
   map: {
     center: [152.95, -27.4],
     zoom: 8.5,

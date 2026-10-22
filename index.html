@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="style.css">
   <script defer src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-  <script defer src="https://unpkg.com/@turf/turf@7.2.0/turf.min.js"></script>
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -30,8 +29,8 @@
         <div class="swap-row"><button id="swap" class="text-button" aria-label="Swap the two boundary datasets">⇅ <span>Swap sides</span></button></div>
         <div class="dataset-field" id="right-field"><div class="dataset-label" id="right-label"><span class="side-tag">B</span> <span id="right-direction">Right side</span></div><div id="right-dataset" class="dataset-buttons" role="group" aria-labelledby="right-label"></div><p id="right-description"></p></div>
         <p id="availability" class="availability"></p>
-        <div class="mode-picker" role="group" aria-label="Comparison mode"><button data-mode="swipe" aria-pressed="true">◧ &nbsp; Swipe</button><button data-mode="overlay" aria-pressed="false">▱ &nbsp; Overlay</button><button data-mode="change" aria-pressed="false">± &nbsp; Change</button></div>
-        <p id="mode-help" class="helper">Drag the divider to reveal the differences.</p>
+        <div class="mode-picker" role="group" aria-label="Comparison mode"><button data-mode="overlay" aria-pressed="true">▱ &nbsp; Overlay</button><button data-mode="change" aria-pressed="false">± &nbsp; Change</button><button data-mode="swipe" aria-pressed="false">◧ &nbsp; Swipe</button></div>
+        <p id="mode-help" class="helper">A is an outline; B is a translucent colour fill.</p>
       </section>
       <section id="change-controls" aria-labelledby="change-title" hidden>
         <h3 id="change-title">Changes to an electorate</h3>

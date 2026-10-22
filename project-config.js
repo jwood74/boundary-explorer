@@ -32,7 +32,7 @@ export function initialState(project, params) {
   const split = params.has('split') ? Number(params.get('split')) : 50;
   return {
     left: choose('left', 'a'), right: choose('right', 'b'),
-    mode: ['swipe', 'overlay', 'change'].includes(mode) ? mode : 'swipe',
+    mode: ['overlay', 'change', 'swipe'].includes(mode) ? mode : 'overlay',
     electorate: params.get('electorate') || defaults.electorate || '',
     split: Number.isFinite(split) && split >= 0 && split <= 100 ? split : 50,
     labels: params.get('labels') !== '0',

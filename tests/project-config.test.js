@@ -52,7 +52,7 @@ test('shared views retain valid state and reject unavailable or disallowed versi
   assert.equal(fallback.left, 'existing');
   assert.equal(fallback.right, 'draft');
   assert.equal(fallback.split, 50);
-  assert.equal(fallback.mode, 'swipe');
+  assert.equal(fallback.mode, 'overlay');
 });
 
 test('normalisation uses project fields and preserves original source data', () => {
