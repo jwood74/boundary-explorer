@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChangeCalculator } from '../change-calculator.js';
 
-function setup() {
+function setup({ ready = true } = {}) {
   const workers = [];
   const calculator = new ChangeCalculator(() => {
     const worker = {
       messages: [], terminated: false,
+      set onmessage(handler) { this.handler = handler; if (ready) this.announceReady(); },
+      get onmessage() { return this.handler; },
+      announceReady() { this.onmessage({ data: { type: 'ready' } }); },
       postMessage(message) { this.messages.push(message); },
       terminate() { this.terminated = true; },
       reply(result) { this.onmessage({ data: { id: this.messages.at(-1).id, result } }); },
@@ -38,6 +41,31 @@ test('reuses an idle worker instead of reloading the geometry library', async ()
   assert.equal(workers[0].terminated, false);
   workers[0].reply('second');
   assert.equal(await next, 'second');
+});
+
+test('the first request waits for the worker readiness handshake', async () => {
+  const { calculator, workers } = setup({ ready: false });
+  const pending = calculator.calculate(data, data, 'North');
+  assert.equal(workers[0].messages.length, 0);
+  workers[0].announceReady();
+  assert.equal(workers[0].messages.length, 1);
+  workers[0].reply('first request delivered');
+  assert.equal(await pending, 'first request delivered');
+});
+
+test('cancelling a starting worker cannot send an obsolete request after readiness', async () => {
+  const { calculator, workers } = setup({ ready: false });
+  const first = calculator.calculate(data, data, 'North');
+  const cancelled = assert.rejects(first, { name: 'AbortError' });
+  const next = calculator.calculate(data, data, 'South');
+  await cancelled;
+  workers[0].announceReady();
+  assert.equal(workers[0].messages.length, 0);
+  assert.equal(workers[1].messages.length, 0);
+  workers[1].announceReady();
+  assert.equal(workers[1].messages[0].name, 'South');
+  workers[1].reply('latest request delivered');
+  assert.equal(await next, 'latest request delivered');
 });
 
 test('a newer selection cancels busy clipping and ignores stale messages', async () => {

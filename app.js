@@ -1,6 +1,21 @@
-import { PROJECTS, DEFAULT_PROJECT_ID } from './projects.js';
-import { datasetsForSide, initialState, normalizeDataset, projectURL, validateProject } from './project-config.js';
-import { ChangeCalculator } from './change-calculator.js';
+// Propagate the HTML's release version through the module graph. Otherwise a
+// CDN/browser can combine fresh HTML with older cached code or configuration.
+function assetURL(path, base = import.meta.url) {
+  const url = new URL(path, base);
+  const version = new URL(import.meta.url).searchParams.get('v');
+  if (version) url.searchParams.set('v', version);
+  return url;
+}
+
+const [
+  { PROJECTS, DEFAULT_PROJECT_ID },
+  { datasetsForSide, initialState, normalizeDataset, projectURL, validateProject },
+  { ChangeCalculator },
+] = await Promise.all([
+  import(assetURL('./projects.js').href),
+  import(assetURL('./project-config.js').href),
+  import(assetURL('./change-calculator.js').href),
+]);
 
 const $ = (id) => document.getElementById(id);
 const requestedProject = new URLSearchParams(location.search).get('project');
@@ -52,7 +67,8 @@ async function loadDataset(id) {
     const request = (async () => {
       const dataset = datasetById(id);
       if (!dataset) throw new Error(`Dataset unavailable: ${id}`);
-      const response = await fetch(dataset.path);
+      const url = new URL(dataset.path, location.href);
+      const response = await fetch(url.origin === location.origin ? assetURL(url.href).href : url.href);
       if (!response.ok) throw new Error(`Could not load ${dataset.label} (HTTP ${response.status}).`);
       const data = await response.json();
       return normalizeDataset(data, project, dataset);

@@ -20,7 +20,7 @@ With Node.js 20 or later:
 npm test
 ```
 
-These dependency-free tests cover project configuration, dataset eligibility, shared-view defaults, GeoJSON field/name mapping, project URLs and background-worker cancellation/retry behaviour.
+These dependency-free tests cover project configuration, dataset eligibility, shared-view defaults, GeoJSON field/name mapping, project URLs, release-version propagation and background-worker readiness/cancellation/retry behaviour.
 
 ## Projects and links
 
@@ -58,7 +58,7 @@ Colours identify boundary sources, not seat ownership or electoral outcomes. In 
 1. Create `projects/<project-id>/config.js` and a `data/` folder alongside it.
 2. Add that project's WGS84 GeoJSON files.
 3. Export a configuration using the example below. `projects/qld-federal-2026/config.js` is the working reference.
-4. Import the configuration in `projects.js` and add it to `PROJECTS`. It appears in the dropdown automatically.
+4. Add `loadProject('./projects/<project-id>/config.js')` to the `PROJECTS` list in `projects.js`. It appears in the dropdown automatically. The loader propagates the release version so newly published configuration is not mixed with cached files.
 
 Example configuration (replace filenames and metadata with your real project):
 
@@ -120,7 +120,7 @@ Tiny differences may reflect digitisation rather than intended changes. Areas ar
 
 - Overlay and Change use one map renderer. Swipe creates a second renderer only while that mode is active.
 - Shared-link updates are debounced until gestures settle; synchronised animation frames do not write browser history.
-- Change calculations run in a cancellable background worker. Only the selected electorate's geometry is sent to it, and Turf is loaded there on demand rather than on the UI thread. A newer selection cancels obsolete calculations.
+- Change calculations run in a cancellable background worker. Only the selected electorate's geometry is sent to it, and Turf is loaded there on demand rather than on the UI thread. The first request waits for a readiness handshake so slow worker startup cannot lose it. A newer selection cancels obsolete calculations.
 - Full-precision comparison results are cached with a 20-entry limit. Display toggles do not resend unchanged GeoJSON to the map workers.
 - Rendering resolution is capped at 2× CSS pixels to reduce GPU load on high-density phones. Touch interaction inspects on tap rather than running hover queries while panning.
 - A resize observer keeps the map canvas aligned with the available space when controls or browser dimensions change.
@@ -130,6 +130,12 @@ The Queensland project uses user-supplied `current.geojson`, `lnp.geojson` and `
 ## Publish on GitHub Pages
 
 This is a plain static site, suitable for a repository named **boundary-explorer**. Enable GitHub Pages for the branch/folder containing `index.html`. No bundling step or server-side routing is needed; project selection uses query parameters, so links work under the repository's Pages URL.
+
+### Release versions and caching
+
+When publishing changes to code, configuration or data, bump the matching `v=` values on the app and stylesheet URLs in `index.html` (for example, `2026-10-22.1` → `2026-10-22.2`). The app carries that version through project configuration, worker code, the comparison module and same-origin GeoJSON requests. Pinned third-party libraries retain their existing URLs.
+
+This matters on hosts/CDNs that cache JavaScript for hours. Without versioned asset URLs, a fresh HTML page can load older cached JavaScript expecting a different setup—such as expecting the geometry library on the UI thread when the new page loads it in a worker. Shared project/comparison links remain unchanged.
 
 ## Structure
 
