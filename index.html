@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore and compare electoral boundaries across redistribution projects.">
+  <meta name="application-name" content="Boundary Explorer">
+  <title>Boundary Explorer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%231b5147'/%3E%3Cpath d='M10 27V14l9-4 11 5v13l-11-5z' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script defer src="https://unpkg.com/@turf/turf@7.2.0/turf.min.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="brand-mark" aria-hidden="true">◫</div>
+    <div class="brand"><h1>Boundary Explorer</h1><p id="project-subtitle">Electoral boundary comparisons</p></div>
+    <div class="project-picker"><label for="project-select">Project</label><select id="project-select" aria-describedby="project-subtitle"></select></div>
+    <span id="stage" class="stage"><span></span><span id="project-stage"></span></span>
+    <button id="share" class="button share">Copy link <span aria-hidden="true">↗</span></button>
+  </header>
+  <main>
+    <aside class="sidebar" aria-label="Comparison controls">
+      <p id="project-notice" class="helper project-notice" role="status" hidden></p>
+      <section aria-labelledby="compare-title">
+        <h3 id="compare-title">Compare boundaries</h3>
+        <div class="dataset-field" id="left-field"><div class="dataset-label" id="left-label"><span class="side-tag">A</span> <span id="left-direction">Left side</span></div><div id="left-dataset" class="dataset-buttons" role="group" aria-labelledby="left-label"></div><p id="left-description"></p></div>
+        <div class="swap-row"><button id="swap" class="text-button" aria-label="Swap the two boundary datasets">⇅ <span>Swap sides</span></button></div>
+        <div class="dataset-field" id="right-field"><div class="dataset-label" id="right-label"><span class="side-tag">B</span> <span id="right-direction">Right side</span></div><div id="right-dataset" class="dataset-buttons" role="group" aria-labelledby="right-label"></div><p id="right-description"></p></div>
+        <p id="availability" class="availability"></p>
+        <div class="mode-picker" role="group" aria-label="Comparison mode"><button data-mode="swipe" aria-pressed="true">◧ &nbsp; Swipe</button><button data-mode="overlay" aria-pressed="false">▱ &nbsp; Overlay</button><button data-mode="change" aria-pressed="false">± &nbsp; Change</button></div>
+        <p id="mode-help" class="helper">Drag the divider to reveal the differences.</p>
+      </section>
+      <section id="change-controls" aria-labelledby="change-title" hidden>
+        <h3 id="change-title">Changes to an electorate</h3>
+        <label class="sr-only" for="change-electorate">Electorate to compare</label>
+        <div class="electorate-picker"><button id="previous-electorate" aria-label="Previous electorate">‹</button><select id="change-electorate"></select><button id="next-electorate" aria-label="Next electorate">›</button></div>
+        <div class="change-navigation"><span id="electorate-position"></span><button id="fit-electorate" class="text-button">Fit electorate ↗</button></div>
+        <p id="change-message" class="helper" role="status"></p>
+      </section>
+      <section aria-label="Find and navigate">
+        <h3 id="find-title">Find an electorate</h3>
+        <form id="search-form" role="search"><label class="sr-only" for="search">Electorate name</label><div class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Electorate name" autocomplete="off" list="electorates"><button type="submit" aria-label="Find electorate">→</button></div><datalist id="electorates"></datalist></form>
+        <p id="search-feedback" class="helper" role="status"></p>
+        <div id="region-views" class="regions" role="group" aria-label="Quick map views"></div>
+      </section>
+      <section class="display-options" aria-label="Map display"><label><input id="labels" type="checkbox" checked> Electorate names</label><label id="baseline-option"><input id="baseline" type="checkbox"><span id="baseline-text"></span></label></section>
+      <details class="about"><summary>About these maps</summary><div id="about-project"></div><p>Built with MapLibre and OpenFreeMap. Basemap credits are on the map.</p></details>
+      <footer id="project-footer"></footer>
+    </aside>
+    <section id="map-stage" class="map-stage" aria-label="Interactive boundary comparison">
+      <div id="map-left" class="map" aria-label="Boundary map A"></div>
+      <div id="map-right" class="map" aria-label="Boundary map B"></div>
+      <div class="map-badges"><span id="left-badge" class="map-badge"></span><span id="right-badge" class="map-badge"></span></div>
+      <div id="divider" class="divider"><button id="divider-handle" role="slider" aria-label="Boundary comparison divider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-orientation="horizontal"><span aria-hidden="true">‹ ›</span></button></div>
+      <div id="map-status" class="map-status" role="status">Loading boundaries…</div>
+      <div id="inspection" class="inspection" aria-live="polite"><p class="eyebrow">Explore the map</p><p>Hover or tap a location to compare electorates.</p></div>
+      <div id="change-legend" class="change-legend" aria-live="polite" hidden>
+        <p class="eyebrow">Change from A → B</p><h3 id="change-name"></h3>
+        <div class="change-key added"><span>Added in B</span><strong id="added-area"></strong></div>
+        <div class="change-key removed"><span>Removed from A</span><strong id="removed-area"></strong></div>
+        <div class="change-key retained"><span>Retained</span><strong id="retained-area"></strong></div>
+        <p>Colours show change, not party. Areas are geographic, not voter counts.</p>
+      </div>
+      <div class="map-tools" role="group" aria-label="Map navigation"><button id="zoom-in" aria-label="Zoom in">+</button><button id="zoom-out" aria-label="Zoom out">−</button><button id="reset-view" aria-label="Show project overview" title="Show project overview">⌂</button></div>
+      <div id="toast" class="toast" role="status" hidden></div>
+    </section>
+  </main>
+  <noscript>This interactive map needs JavaScript enabled.</noscript>
+</body>
+</html>
