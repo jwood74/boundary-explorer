@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { datasetsForSide, initialState, normalizeDataset, projectURL, validateProject } from '../project-config.js';
+import { datasetsForSide, electorateComparisonLabel, initialState, matchingElectorateFeatures, normalizeDataset, projectURL, validateProject } from '../project-config.js';
 import { PROJECTS, DEFAULT_PROJECT_ID } from '../projects.js';
 
 // Deliberately uses no Queensland names, party ids or mandatory Current dataset.
@@ -68,6 +68,33 @@ test('dataset field overrides and explicit name mappings support different expor
   assert.equal(normalizeDataset(collection({ NAME: 'OLD_DIVISION' }), project, dataset).features[0].properties.displayName, 'New Division');
   assert.equal(normalizeDataset(collection({ division: 'Mcpherson' }), project, project.datasets[0]).features[0].properties.displayName, 'McPherson');
   assert.equal(normalizeDataset(collection({ division: 'MCPHERSON' }), project, project.datasets[0]).features[0].properties.displayName, 'McPherson');
+});
+
+test('renamed electorates keep source labels while sharing a comparison identity', () => {
+  const oldDataset = { ...project.datasets[0], nameAliases: { Grey: "O'Donoghue" } };
+  const original = collection({ division: 'GREY' });
+  const old = normalizeDataset(original, project, oldDataset);
+  const newer = normalizeDataset(collection({ division: "O'Donoghue" }), project, project.datasets[1]);
+  const name = "O'Donoghue";
+  assert.equal(old.features[0].properties.displayName, name);
+  assert.equal(old.features[0].properties.sourceName, 'Grey');
+  assert.equal(original.features[0].properties.sourceName, undefined);
+  assert.equal(electorateComparisonLabel(old, newer, name), "Grey → O'Donoghue");
+  assert.equal(electorateComparisonLabel(newer, old, name), "O'Donoghue → Grey");
+  assert.equal(electorateComparisonLabel(old, old, name), 'Grey');
+  assert.equal(electorateComparisonLabel(old, collection({ division: 'Other' }), name), 'Grey');
+  for (const query of ['grey', " O'DONOGHUE "]) {
+    assert.deepEqual(matchingElectorateFeatures([old, newer], query), [...old.features, ...newer.features]);
+  }
+  assert.deepEqual(matchingElectorateFeatures([old, newer], 'Unknown'), []);
+});
+
+test('rename mappings are scoped to their dataset and project', () => {
+  const mappedProject = { ...project, nameAliases: { Grey: 'Project name' } };
+  const dataset = { ...project.datasets[0], nameAliases: { Grey: "O'Donoghue" } };
+  assert.equal(normalizeDataset(collection({ division: 'Grey' }), mappedProject, dataset).features[0].properties.displayName, "O'Donoghue");
+  assert.equal(normalizeDataset(collection({ division: 'Grey' }), mappedProject, project.datasets[0]).features[0].properties.displayName, 'Project name');
+  assert.equal(normalizeDataset(collection({ division: 'Grey' }), project, project.datasets[0]).features[0].properties.displayName, 'Grey');
 });
 
 test('invalid names and non-polygon data fail with actionable messages', () => {

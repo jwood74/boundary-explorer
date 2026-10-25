@@ -2,7 +2,12 @@
 
 A static website for exploring and comparing electoral boundaries across redistribution projects. One shared map engine supports federal and state projects, party submissions, official proposals and final boundaries.
 
-**Currently available:** Queensland federal redistribution, 2026. This is the default project. Additional projects appear in the project dropdown when their configuration and boundary files are registered.
+**Currently available:**
+
+- Queensland federal redistribution, 2026 (default): Current, ALP, LNP and Greens boundaries.
+- South Australia federal boundaries, 2018–2026: old and new boundaries, with 10 electorates in each file.
+
+Select a project from the project dropdown. Additional projects appear when their configuration and boundary files are registered.
 
 ## Run locally
 
@@ -28,6 +33,7 @@ The project selector navigates to a unique URL:
 
 ```text
 ?project=qld-federal-2026
+?project=sa-federal-2026
 ```
 
 The hash stores the comparison and map view. For example:
@@ -44,7 +50,7 @@ The hash stores the comparison and map view. For example:
 
 ## Explore
 
-- **Boundary buttons:** select the versions for A and B. Labels, colours, side restrictions and availability are defined by each project. Queensland's Current version is available only in A; ALP is disabled until its map is added. Swap is enabled only when both versions are allowed on the opposite side.
+- **Boundary buttons:** select the versions for A and B. Labels, colours, side restrictions and availability are defined by each project. Queensland's Current version is available only in A; ALP, LNP and Greens suggestions are available on either side. Swap is enabled only when both versions are allowed on the opposite side.
 - **Swipe:** drag the divider, or focus it and use Left/Right (Home/End reveal one full map).
 - **Overlay:** A is an outline only; B is a translucent fill with subtle edges, drawn above A. B's unhighlighted fill is lighter and the hovered/searched electorate is darker. Only B receives highlights, using its dataset colour.
 - **Change:** A is the starting version; B is the destination. All A outlines stay visible. Click an A electorate, use the dropdown, or step alphabetically with previous/next. Green shows territory added in B (`B − A`), red with dashed edges shows territory removed from A (`A − B`), and faint grey shows retained territory (`A ∩ B`). A's outlines are dashed; the selected B outline is solid. The legend reports approximate geographic areas in km². **Fit electorate** restores the extent after panning.
@@ -100,15 +106,25 @@ Project IDs and dataset IDs should be stable: they are used by shared links. Inc
 - `path: null`: disabled button. `hideWhenUnavailable: true` hides it until a path is supplied.
 - `sides: ['left']` or `['right']`: restrict a dataset to one side. Omit for both.
 - `nameProperty`: optional per-dataset override of the project's GeoJSON name field.
-- `nameAliases`: optional mapping from a formatted source name to a canonical comparison name, for example `{ 'Old Division': 'New Division' }`. Project-level mappings are also supported; dataset mappings take precedence. Use only when an explicit same-electorate mapping is intended.
+- `nameAliases`: optional mapping from a formatted source name to a canonical comparison name, for example `{ 'Old Division': 'New Division' }`. Project-level mappings are also supported; dataset mappings take precedence. Use only when an explicit same-electorate mapping is intended. Original map labels and hover names are preserved; Change mode shows both names and search accepts either.
 
 All dataset files must be WGS84 longitude/latitude GeoJSON FeatureCollections containing Polygon or MultiPolygon features. Every feature must contain a non-empty name in the configured property. Original files are not modified. Underscores and capitalisation are normalised for display and matching; mixed-case names are preserved where possible.
 
 Paths built with `new URL(..., import.meta.url)` work both locally and under a GitHub Pages repository path. Queensland's existing files remain in the root `data/` folder; its config resolves those paths relative to itself.
 
-### Add ALP or the Queensland official proposal
+### Link an electorate name change
 
-Put the file in `data/`, then edit its entry in `projects/qld-federal-2026/config.js`: replace `path: null` with `path: dataPath('alp')` or `dataPath('proposed')` and update its description.
+Add `nameAliases` to the dataset with the former name, mapping it to the name used by the newer dataset. For example, South Australia's 2018 dataset contains:
+
+```js
+nameAliases: { Grey: "O'Donoghue" }
+```
+
+Grey and O'Donoghue then form one comparison entry, **Grey → O'Donoghue**, rather than separate removed/added electorates. Swapping A and B reverses the label. Maps retain the names used in each source file, and searching either name fits both versions. Shared links using the former name are resolved when that version is selected. For multiple historical names, map each former name directly to the same canonical name; mappings are explicit, not inferred or chained.
+
+### Add the Queensland official proposal
+
+Put the file at `data/qld_2028_proposed.geojson`, then edit its entry in `projects/qld-federal-2026/config.js`: replace `path: null` with `path: dataPath('proposed')` and update its description.
 
 ## Geometry and provenance
 
@@ -125,7 +141,9 @@ Tiny differences may reflect digitisation rather than intended changes. Areas ar
 - Rendering resolution is capped at 2× CSS pixels to reduce GPU load on high-density phones. Touch interaction inspects on tap rather than running hover queries while panning.
 - A resize observer keeps the map canvas aligned with the available space when controls or browser dimensions change.
 
-The Queensland project uses user-supplied `current.geojson`, `lnp.geojson` and `grn.geojson`, each containing 30 features. Source document URLs, licensing and digitisation details have not yet been supplied. Party suggestions are distinct from the forthcoming official proposal.
+The Queensland project uses user-supplied `qld_2028_current.geojson`, `qld_2028_alp.geojson`, `qld_2028_lnp.geojson` and `qld_2028_grn.geojson`, each containing 30 features. Source document URLs, licensing and digitisation details have not yet been supplied. Party suggestions are distinct from the forthcoming official proposal.
+
+The South Australian project uses user-supplied `sa_2018.geojson` and `sa_2026.geojson`, each containing 10 features. It defaults to 2018 in A and 2026 in B, with both versions available on either side. Grey (2018) is explicitly linked to O’Donoghue (2026) using a dataset name mapping. Source document URLs, licensing and digitisation details have not yet been supplied.
 
 ## Publish on GitHub Pages
 
@@ -149,7 +167,7 @@ change-worker.js            On-demand Turf worker (off the UI thread)
 project-config.js           Configuration, view defaults and data normalisation
 projects.js                 Project registry and default project
 projects/<id>/config.js     Project-specific metadata, versions and map views
-data/                       Existing Queensland GeoJSON files
+data/                       Queensland and South Australian GeoJSON files
 tests/                      Dependency-free configuration tests
 ```
 

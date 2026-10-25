@@ -1,5 +1,5 @@
 // Paths are resolved relative to this file, including on GitHub Pages.
-const dataPath = (name) => new URL(`../../data/${name}.geojson`, import.meta.url).href;
+const dataPath = (name) => new URL(`../../data/qld_2028_${name}.geojson`, import.meta.url).href;
 
 export default {
   id: 'qld-federal-2026',
@@ -26,7 +26,7 @@ export default {
   ],
   datasets: [
     { id: 'current', label: 'Current boundaries', short: 'Current', description: 'Existing federal electoral divisions', color: '#666b70', path: dataPath('current'), sides: ['left'] },
-    { id: 'alp', label: 'ALP suggestion', short: 'ALP', description: 'Map coming soon', color: '#ba3b47', path: null },
+    { id: 'alp', label: 'ALP suggestion', short: 'ALP', description: 'Australian Labor Party submission', color: '#ba3b47', path: dataPath('alp') },
     { id: 'lnp', label: 'LNP suggestion', short: 'LNP', description: 'Liberal National Party submission', color: '#2161a6', path: dataPath('lnp') },
     { id: 'grn', label: 'Greens suggestion', short: 'Greens', buttonLabel: 'GRN', description: 'Queensland Greens submission', color: '#28794a', path: dataPath('grn') },
     { id: 'proposed', label: 'Official proposal', short: 'Proposal', description: 'Not yet published', color: '#b36b16', path: null, hideWhenUnavailable: true },

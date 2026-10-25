@@ -7,5 +7,6 @@ async function loadProject(path) {
 // Add a project's config here once its boundary files are available.
 export const PROJECTS = await Promise.all([
   loadProject('./projects/qld-federal-2026/config.js'),
+  loadProject('./projects/sa-federal-2026/config.js'),
 ]);
 export const DEFAULT_PROJECT_ID = 'qld-federal-2026';

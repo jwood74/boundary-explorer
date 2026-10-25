@@ -9,7 +9,7 @@ function assetURL(path, base = import.meta.url) {
 
 const [
   { PROJECTS, DEFAULT_PROJECT_ID },
-  { datasetsForSide, initialState, normalizeDataset, projectURL, validateProject },
+  { datasetsForSide, electorateComparisonLabel, initialState, matchingElectorateFeatures, normalizeDataset, projectURL, validateProject },
   { ChangeCalculator },
 ] = await Promise.all([
   import(assetURL('./projects.js').href),
@@ -146,12 +146,12 @@ function addLayers(map) {
   map.addLayer({ id: 'reference-line', type: 'line', source: 'reference', paint: { 'line-color': '#666b70', 'line-width': 2.4 } });
   map.addLayer({ id: 'baseline-line', type: 'line', source: 'baseline', paint: { 'line-color': baselineDataset?.color || '#666b70', 'line-width': 1.3, 'line-dasharray': [2, 3], 'line-opacity': 0.8 } });
   map.addLayer({ id: 'boundary-highlight', type: 'line', source: 'boundary', filter: ['==', ['get', 'displayName'], ''], paint: { 'line-color': '#666b70', 'line-width': 4 } });
-  map.addLayer({ id: 'boundary-label', type: 'symbol', source: 'boundary', layout: { 'text-field': ['get', 'displayName'], 'text-font': ['Noto Sans Regular'], 'text-size': 15, 'text-max-width': 9 }, paint: { 'text-color': '#41354d', 'text-halo-color': '#fff', 'text-halo-width': 2 } });
+  map.addLayer({ id: 'boundary-label', type: 'symbol', source: 'boundary', layout: { 'text-field': ['coalesce', ['get', 'sourceName'], ['get', 'displayName']], 'text-font': ['Noto Sans Regular'], 'text-size': 15, 'text-max-width': 9 }, paint: { 'text-color': '#41354d', 'text-halo-color': '#fff', 'text-halo-width': 2 } });
   // Draw A's reference outline below B's fill, edges and highlights.
   map.moveLayer('reference-line', 'boundary-fill');
   // Transparent hit area allows selecting A by clicking anywhere inside it.
   map.addLayer({ id: 'reference-hit', type: 'fill', source: 'reference', paint: { 'fill-opacity': 0 } }, 'reference-line');
-  map.addLayer({ id: 'reference-label', type: 'symbol', source: 'reference', layout: { visibility: 'none', 'text-field': ['get', 'displayName'], 'text-font': ['Noto Sans Regular'], 'text-size': 15, 'text-max-width': 9 }, paint: { 'text-color': '#666b70', 'text-halo-color': '#fff', 'text-halo-width': 2 } });
+  map.addLayer({ id: 'reference-label', type: 'symbol', source: 'reference', layout: { visibility: 'none', 'text-field': ['coalesce', ['get', 'sourceName'], ['get', 'displayName']], 'text-font': ['Noto Sans Regular'], 'text-size': 15, 'text-max-width': 9 }, paint: { 'text-color': '#666b70', 'text-halo-color': '#fff', 'text-halo-width': 2 } });
   for (const [kind, color, opacity] of [['retained', '#66716c', 0.08], ['added', '#16835b', 0.38], ['removed', '#c44751', 0.38]]) {
     const source = `change-${kind}`;
     map.addSource(source, { type: 'geojson', data: empty });
@@ -184,10 +184,12 @@ async function render({ fitChange = false } = {}) {
     const [left, right, baseline] = await Promise.all([loadDataset(state.left), loadDataset(state.right), baselineDataset && state.baseline ? loadDataset(baselineDataset.id) : empty]);
     if (version !== generation) return;
     electorateNames = [...new Set([...left.features, ...right.features].map((feature) => feature.properties.displayName))].sort();
+    // Older shared links may still use the electorate's former name.
+    if (!electorateNames.includes(state.electorate)) state.electorate = matchingElectorateFeatures([left, right], state.electorate)[0]?.properties.displayName || state.electorate;
     if (!electorateNames.includes(state.electorate)) state.electorate = electorateNames.includes(project.defaults?.electorate) ? project.defaults.electorate : electorateNames[0] || '';
     const count = new Set(left.features.map((feature) => feature.properties.displayName)).size;
     $('project-footer').textContent = `${count} ${project.electorateLabel || 'electorates'}. A few different possibilities.`;
-    $('change-electorate').replaceChildren(...electorateNames.map((name) => new Option(name, name)));
+    $('change-electorate').replaceChildren(...electorateNames.map((name) => new Option(electorateComparisonLabel(left, right, name), name)));
     $('change-electorate').value = state.electorate;
     const index = electorateNames.indexOf(state.electorate);
     $('electorate-position').textContent = `${index + 1} of ${electorateNames.length}`;
@@ -226,7 +228,8 @@ async function render({ fitChange = false } = {}) {
       map.setPaintProperty('reference-line', 'line-color', datasetById(state.left).color);
       map.setPaintProperty('reference-label', 'text-color', datasetById(state.left).color);
       map.setLayoutProperty('reference-label', 'visibility', changes && state.labels ? 'visible' : 'none');
-      map.setFilter('reference-label', changes?.b ? ['!=', ['get', 'displayName'], state.electorate] : null);
+      const renamed = changes?.a && changes?.b && electorateComparisonLabel(left, right, state.electorate).includes(' → ');
+      map.setFilter('reference-label', changes?.b && !renamed ? ['!=', ['get', 'displayName'], state.electorate] : null);
       map.setPaintProperty('reference-line', 'line-dasharray', changes ? [3, 2] : [1, 0]);
       map.setLayoutProperty('boundary-highlight', 'visibility', changes || state.mode === 'overlay' && !i ? 'none' : 'visible');
       map.setLayoutProperty('boundary-label', 'visibility', state.labels ? 'visible' : 'none');
@@ -235,14 +238,17 @@ async function render({ fitChange = false } = {}) {
       map.getCanvas().style.cursor = '';
       for (const kind of ['added', 'removed', 'retained']) setSourceData(map, `change-${kind}`, i && changes ? changes[kind] || empty : empty);
     }
-    $('electorates').replaceChildren(...electorateNames.map((name) => new Option(name, name)));
+    const searchNames = [...new Set([...left.features, ...right.features].flatMap((feature) => [feature.properties.sourceName, feature.properties.displayName]))].sort();
+    $('electorates').replaceChildren(...searchNames.map((name) => new Option(name, name)));
     if (changes) {
-      $('change-name').textContent = state.electorate;
+      const comparisonLabel = electorateComparisonLabel(left, right, state.electorate);
+      $('change-name').textContent = comparisonLabel;
       for (const kind of ['added', 'removed', 'retained']) {
         const area = changes.areas[kind];
         $(`${kind}-area`).textContent = `${area > 0 && area < 0.01 ? '<0.01' : area.toLocaleString('en-AU', { maximumFractionDigits: 2 })} km²`;
       }
       $('change-message').textContent = !changes.a ? 'Not present under this name in A. The B footprint is shown as added.' : !changes.b ? 'Not present under this name in B. The A footprint is shown as removed.' : !changes.added && !changes.removed ? 'No boundary changes for this electorate between these versions.' : '';
+      if (changes.a && changes.b && comparisonLabel.includes(' → ')) $('change-message').textContent = `Linked electorate names: ${comparisonLabel}. ${$('change-message').textContent}`.trim();
       $('change-legend').hidden = false;
       const features = [changes.a, changes.b].filter(Boolean);
       if (features.length) changeBounds = coordinatesBounds(features);
@@ -288,8 +294,8 @@ function inspect(lngLat) {
   if (!aMap?.getLayer('boundary-fill')) return;
   const aLayer = state.mode === 'swipe' ? 'boundary-fill' : 'reference-hit';
   const results = [
-    aMap.queryRenderedFeatures(aMap.project(lngLat), { layers: [aLayer] })[0]?.properties.displayName,
-    primary.queryRenderedFeatures(primary.project(lngLat), { layers: ['boundary-fill'] })[0]?.properties.displayName,
+    aMap.queryRenderedFeatures(aMap.project(lngLat), { layers: [aLayer] })[0]?.properties,
+    primary.queryRenderedFeatures(primary.project(lngLat), { layers: ['boundary-fill'] })[0]?.properties,
   ];
   const key = JSON.stringify(results);
   if (key === lastInspectionKey) return;
@@ -299,8 +305,8 @@ function inspect(lngLat) {
   title.className = 'eyebrow';
   title.textContent = 'Electorates at this location';
   $('inspection').append(title);
-  results.forEach((nameAtPoint, i) => {
-    if (maps[i]) highlightElectorate(maps[i], nameAtPoint || '', i);
+  results.forEach((properties, i) => {
+    if (maps[i]) highlightElectorate(maps[i], properties?.displayName || '', i);
     const dataset = datasetById(i ? state.right : state.left);
     const row = document.createElement('div');
     row.className = 'inspect-row';
@@ -308,7 +314,7 @@ function inspect(lngLat) {
     const label = document.createElement('span');
     label.textContent = `${i ? 'B' : 'A'} · ${dataset.short || dataset.label}`;
     const name = document.createElement('strong');
-    name.textContent = results[i] || 'Outside mapped area';
+    name.textContent = properties?.sourceName || properties?.displayName || 'Outside mapped area';
     row.append(label, name);
     $('inspection').append(row);
   });
@@ -352,7 +358,7 @@ async function searchElectorate(event) {
   if (!query) return;
   try {
     const selected = await Promise.all([loadDataset(state.left), loadDataset(state.right)]);
-    const features = selected.flatMap((data) => data.features).filter((feature) => feature.properties.displayName.toLowerCase() === query);
+    const features = matchingElectorateFeatures(selected, query);
     if (!features.length) {
       $('search-feedback').textContent = 'No matching electorate in these two maps. Try a name from the suggestions.';
       return;

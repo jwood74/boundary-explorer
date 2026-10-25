@@ -57,8 +57,27 @@ export function normalizeDataset(data, project, dataset) {
     if (!['Polygon', 'MultiPolygon'].includes(feature.geometry?.type)) throw new Error(`${dataset.label}: feature ${index + 1} must be a Polygon or MultiPolygon.`);
     const name = displayName(rawName);
     const canonicalName = dataset.nameAliases?.[name] || project.nameAliases?.[name] || name;
-    return { ...feature, properties: { ...feature.properties, displayName: canonicalName } };
+    return { ...feature, properties: { ...feature.properties, sourceName: name, displayName: canonicalName } };
   }) };
+}
+
+// Keep comparison identity separate from the names printed on each map.
+export function electorateComparisonLabel(left, right, name) {
+  const sourceName = (data) => {
+    const feature = data.features.find((feature) => feature.properties.displayName === name);
+    return feature && (feature.properties.sourceName || feature.properties.displayName);
+  };
+  const a = sourceName(left);
+  const b = sourceName(right);
+  return a && b && a !== b ? `${a} → ${b}` : a || b || name;
+}
+
+export function matchingElectorateFeatures(datasets, query) {
+  const features = datasets.flatMap((data) => data.features);
+  const text = query.trim().toLowerCase();
+  const names = new Set(features.filter((feature) => [feature.properties.displayName, feature.properties.sourceName]
+    .some((name) => name?.toLowerCase() === text)).map((feature) => feature.properties.displayName));
+  return features.filter((feature) => names.has(feature.properties.displayName));
 }
 
 export function projectURL(href, id, { resetView = false } = {}) {
